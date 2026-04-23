@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Distributed Drawing Board — Mini RAFT</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #1a1a2e;
+      color: #e0e0e0;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 10px 18px;
+      background: #16213e;
+      border-bottom: 1px solid #0f3460;
+      flex-shrink: 0;
+    }
+
+    header h1 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #e94560;
+      letter-spacing: 0.05em;
+    }
+
+    .status-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-left: auto;
+      font-size: 0.8rem;
+    }
+
+    .dot {
+      width: 9px; height: 9px;
+      border-radius: 50%;
+      background: #555;
+      transition: background 0.3s;
+    }
+    .dot.green { background: #00c97a; }
+    .dot.red   { background: #e94560; }
+    .dot.yellow { background: #f5a623; }
+
+    #leader-label {
+      color: #aaa;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 18px;
+      background: #16213e;
+      border-bottom: 1px solid #0f3460;
+      flex-shrink: 0;
+    }
+
+    .color-btn {
+      width: 26px; height: 26px;
+      border-radius: 50%;
+      border: 2px solid transparent;
+      cursor: pointer;
+      transition: border-color 0.2s;
+    }
+    .color-btn.active { border-color: #fff; }
+
+    label { font-size: 0.82rem; color: #aaa; }
+
+    input[type=range] {
+      accent-color: #e94560;
+      width: 90px;
+    }
+
+    button {
+      padding: 5px 14px;
+      border: none;
+      border-radius: 6px;
+      background: #e94560;
+      color: #fff;
+      font-size: 0.82rem;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    button:hover { opacity: 0.85; }
+
+    #canvas-wrap {
+      flex: 1;
+      overflow: hidden;
+      position: relative;
+    }
+
+    canvas {
+      display: block;
+      background: #fff;
+      cursor: crosshair;
+      width: 100%;
+      height: 100%;
+    }
+
+    #cluster-panel {
+      position: absolute;
+      bottom: 12px;
+      right: 12px;
+      background: rgba(22, 33, 62, 0.92);
+      border: 1px solid #0f3460;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 0.75rem;
+      min-width: 200px;
+    }
+
+    #cluster-panel h3 {
+      font-size: 0.78rem;
+      color: #e94560;
+      margin-bottom: 6px;
+      letter-spacing: 0.05em;
+    }
+
+    .replica-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+
+    .replica-row .dot { flex-shrink: 0; }
+
+    .tag {
+      font-size: 0.68rem;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: #0f3460;
+      color: #e94560;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>⬡ Distributed Drawing Board — Mini RAFT</h1>
+  <div class="status-bar">
+    <div class="dot" id="ws-dot"></div>
+    <span id="ws-label">Connecting…</span>
+    &nbsp;|&nbsp;
+    <span id="leader-label">Leader: —</span>
+  </div>
+</header>
+
+<div class="toolbar">
+  <div class="color-btn active" style="background:#e94560" data-color="#e94560" title="Red"></div>
+  <div class="color-btn" style="background:#00c97a" data-color="#00c97a" title="Green"></div>
+  <div class="color-btn" style="background:#4fc3f7" data-color="#4fc3f7" title="Blue"></div>
+  <div class="color-btn" style="background:#f5a623" data-color="#f5a623" title="Orange"></div>
+  <div class="color-btn" style="background:#1a1a2e" data-color="#1a1a2e" title="Dark"></div>
+  <div class="color-btn" style="background:#111" data-color="#111" title="Black"></div>
+  <div class="color-btn" style="background:#fff; border:1px solid #888" data-color="#fff" title="Eraser"></div>
+  <label>Size <input type="range" id="brush-size" min="2" max="40" value="6" /></label>
+  <button id="clear-btn">Clear Canvas</button>
+</div>
+
+<div id="canvas-wrap">
+  <canvas id="canvas"></canvas>
+
+  <div id="cluster-panel">
+    <h3>CLUSTER STATUS</h3>
+    <div id="replica-list">Loading…</div>
+  </div>
+</div>
+
+<script>
+  // ── Canvas setup ──────────────────────────────────────────────────────────
+  const canvas = document.getElementById("canvas");
+  const ctx = canvas.getContext("2d");
+
+  function resizeCanvas() {
+    const wrap = document.getElementById("canvas-wrap");
+    canvas.width = wrap.clientWidth;
+    canvas.height = wrap.clientHeight;
+  }
+  resizeCanvas();
+  window.addEventListener("resize", resizeCanvas);
+
+  let drawing = false;
+  let lastX = 0, lastY = 0;
+  let currentColor = "#e94560";
+  let brushSize = 6;
+
+  document.querySelectorAll(".color-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".color-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      currentColor = btn.dataset.color;
+    });
+  });
+
+  document.getElementById("brush-size").addEventListener("input", e => {
+    brushSize = parseInt(e.target.value);
+  });
+
+  document.getElementById("clear-btn").addEventListener("click", () => {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Optionally send a clear event — for this demo just local clear
+  });
+
+  function getPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const touch = e.touches ? e.touches[0] : e;
+    return {
+      x: (touch.clientX - rect.left) * scaleX,
+      y: (touch.clientY - rect.top) * scaleY,
+    };
+  }
+
+  function drawLine(x0, y0, x1, y1, color, size, emit) {
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = size;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.stroke();
+
+    if (emit && ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ x0, y0, x1, y1, color, size }));
+    }
+  }
+
+  canvas.addEventListener("mousedown", e => {
+    drawing = true;
+    const { x, y } = getPos(e);
+    lastX = x; lastY = y;
+  });
+  canvas.addEventListener("mousemove", e => {
+    if (!drawing) return;
+    const { x, y } = getPos(e);
+    drawLine(lastX, lastY, x, y, currentColor, brushSize, true);
+    lastX = x; lastY = y;
+  });
+  canvas.addEventListener("mouseup", () => drawing = false);
+  canvas.addEventListener("mouseleave", () => drawing = false);
+
+  canvas.addEventListener("touchstart", e => {
+    e.preventDefault();
+    drawing = true;
+    const { x, y } = getPos(e);
+    lastX = x; lastY = y;
+  }, { passive: false });
+  canvas.addEventListener("touchmove", e => {
+    e.preventDefault();
+    if (!drawing) return;
+    const { x, y } = getPos(e);
+    drawLine(lastX, lastY, x, y, currentColor, brushSize, true);
+    lastX = x; lastY = y;
+  }, { passive: false });
+  canvas.addEventListener("touchend", () => drawing = false);
+
+  // ── WebSocket ─────────────────────────────────────────────────────────────
+  const GW_HOST = window.location.hostname;
+  let ws;
+
+  function connect() {
+    ws = new WebSocket(`ws://${GW_HOST}:3000`);
+
+    ws.onopen = () => {
+      setWsStatus("connected");
+    };
+
+    ws.onmessage = (e) => {
+      const msg = JSON.parse(e.data);
+      if (msg.type === "stroke") {
+        const s = msg.data;
+        drawLine(s.x0, s.y0, s.x1, s.y1, s.color, s.size, false);
+      } else if (msg.type === "init") {
+        // Replay all strokes from log
+        for (const s of msg.strokes) {
+          drawLine(s.x0, s.y0, s.x1, s.y1, s.color, s.size, false);
+        }
+      }
+    };
+
+    ws.onclose = () => {
+      setWsStatus("disconnected");
+      setTimeout(connect, 1500);
+    };
+
+    ws.onerror = () => {
+      setWsStatus("error");
+    };
+  }
+
+  connect();
+
+  function setWsStatus(status) {
+    const dot = document.getElementById("ws-dot");
+    const label = document.getElementById("ws-label");
+    dot.className = "dot";
+    if (status === "connected") { dot.classList.add("green"); label.textContent = "Connected"; }
+    else if (status === "disconnected") { dot.classList.add("red"); label.textContent = "Disconnected"; }
+    else { dot.classList.add("yellow"); label.textContent = "Error"; }
+  }
+
+  // ── Cluster Status Panel ──────────────────────────────────────────────────
+  // Fetches via the gateway (port 3000) — browser can't reach replica ports directly
+
+  async function fetchClusterStatus() {
+    let statuses;
+    try {
+      const res = await fetch(`http://${GW_HOST}:3000/cluster-status`);
+      statuses = await res.json();
+    } catch (_) {
+      document.getElementById("replica-list").innerHTML =
+        `<div style="color:#e94560;font-size:0.75rem">⚠️ Gateway unreachable</div>`;
+      return;
+    }
+
+    let html = "";
+    let leader = "—";
+
+    for (const d of statuses) {
+      if (!d.online) {
+        html += `
+          <div class="replica-row">
+            <div class="dot red"></div>
+            <span>${d.id}</span>
+            <span style="color:#e94560;font-size:0.7rem">offline</span>
+          </div>`;
+      } else {
+        const isLeader = d.state === "leader";
+        if (isLeader) leader = d.id;
+        const dotClass = isLeader ? "green" : d.state === "candidate" ? "yellow" : "green";
+        html += `
+          <div class="replica-row">
+            <div class="dot ${dotClass}"></div>
+            <span>${d.id}</span>
+            ${isLeader ? '<span class="tag">LEADER</span>' : `<span style="color:#888;font-size:0.7rem">${d.state}</span>`}
+            <span style="color:#555;font-size:0.68rem">t${d.term}</span>
+          </div>`;
+      }
+    }
+
+    document.getElementById("replica-list").innerHTML = html;
+    document.getElementById("leader-label").textContent = `Leader: ${leader}`;
+  }
+
+  setInterval(fetchClusterStatus, 1000);
+  fetchClusterStatus();
+</script>
+</body>
+</html>
