@@ -2,7 +2,6 @@
 
 A fault-tolerant, real-time collaborative drawing platform built on a Mini-RAFT consensus protocol. Multiple users can draw simultaneously on a shared canvas, with all strokes replicated and committed through a cluster of three replica nodes.
 
----
 
 ## What This Does
 
@@ -12,7 +11,6 @@ A fault-tolerant, real-time collaborative drawing platform built on a Mini-RAFT 
 - Hot-reloading any replica causes zero downtime for connected clients
 - Full failover, catch-up, and log replication as per RAFT spec
 
----
 
 ## System Architecture
 
@@ -35,7 +33,6 @@ A fault-tolerant, real-time collaborative drawing platform built on a Mini-RAFT 
                     raft-net (Docker bridge)
 ```
 
----
 
 ## Tech Stack
 
@@ -47,7 +44,6 @@ A fault-tolerant, real-time collaborative drawing platform built on a Mini-RAFT 
 | Containers | Docker, docker-compose |
 | Protocol | Mini-RAFT (custom implementation) |
 
----
 
 ## Project Structure
 
@@ -76,8 +72,6 @@ MINIRAFT/
 │   └── watch_logs.sh
 └── docker-compose.yml
 ```
-
----
 
 ## Getting Started
 
@@ -120,7 +114,6 @@ docker compose up -d
 docker compose down
 ```
 
----
 
 ## Mini-RAFT Protocol
 
@@ -160,7 +153,6 @@ Node restarts → empty log
     → Node catches up and participates normally
 ```
 
----
 
 ## API Reference
 
@@ -186,7 +178,6 @@ Node restarts → empty log
 | `/cluster-status` | GET | All replica statuses proxied |
 | `/health` | GET | Liveness check |
 
----
 
 ## Testing Failover
 
@@ -218,8 +209,6 @@ chmod +x scripts/*.sh
 code replica2/index.js
 ```
 
----
-
 ## Demo Checklist (Video)
 
 - [ ] Drawing from multiple browser tabs simultaneously
@@ -229,25 +218,12 @@ code replica2/index.js
 - [ ] Restarted replica catches up to correct log length
 - [ ] Chaos test — multiple rapid failures
 
----
 
 ## Team
 
-| Person | Responsibility |
+| Member | Responsibility |
 |--------|---------------|
-| Person 1 | Frontend — Canvas drawing, WebSocket client, real-time rendering |
-| Person 2 | Gateway — WebSocket server, leader routing, failover handling |
-| Person 3 | RAFT Core — Leader election, log replication, commit logic |
-| Person 4 | Docker & DevOps — Containers, hot reload, fault tolerance, catch-up |
-
----
-
-## Real-World Relevance
-
-| This Project | Production Equivalent |
-|-------------|----------------------|
-| Mini-RAFT consensus | etcd (used by Kubernetes) |
-| Leader election | CockroachDB, TiKV |
-| Hot reload zero downtime | Blue-green deployments on AWS/GCP |
-| WebSocket real-time sync | Figma, Miro, Google Docs |
-| Docker microservices | Kubernetes pod architecture |
+| Eshwar R A | Frontend — Canvas drawing, WebSocket client, real-time rendering |
+| Diya D Bhat | Gateway — WebSocket server, leader routing, failover handling, logs & strokes handling |
+| Delisha Riyona Dsouza | RAFT Core — Leader election, log replication, commit logic |
+| Dhanya Prabhu | Docker & DevOps — Containers, hot reload, fault tolerance, catch-up |
